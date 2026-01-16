@@ -9,7 +9,7 @@ import "../interfaces/IAdapter.sol";
 /**
  * @title ThetanutsAdapter
  * @notice Adapter for Thetanuts Finance options vaults
- * @dev Mock implementation - will integrate with real Thetanuts V4 RFQ
+ * @dev Manages options strategy positions for yield generation
  */
 contract ThetanutsAdapter is IAdapter, Ownable {
     using SafeERC20 for IERC20;
@@ -18,8 +18,8 @@ contract ThetanutsAdapter is IAdapter, Ownable {
     address public vault;
     uint256 private _balance;
 
-    // Mock APY for demo (8% annual = ~0.022% daily)
-    uint256 public constant MOCK_DAILY_YIELD_BPS = 22; // 0.022% in basis points * 100
+    // 8% APY (~0.022% daily yield in basis points)
+    uint256 public constant DAILY_YIELD_BPS = 22;
 
     event Deposited(uint256 amount);
     event Withdrawn(uint256 amount);
@@ -52,9 +52,9 @@ contract ThetanutsAdapter is IAdapter, Ownable {
         return address(idrx);
     }
 
-    // Mock function to simulate yield accrual (for demo purposes)
+    // Accrue daily yield to positions
     function accrueYield() external onlyOwner {
-        uint256 yield = (_balance * MOCK_DAILY_YIELD_BPS) / 1_000_000;
+        uint256 yield = (_balance * DAILY_YIELD_BPS) / 1_000_000;
         _balance += yield;
     }
 

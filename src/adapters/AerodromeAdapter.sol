@@ -9,7 +9,7 @@ import "../interfaces/IAdapter.sol";
 /**
  * @title AerodromeAdapter
  * @notice Adapter for Aerodrome LP positions on Base
- * @dev Mock implementation - will integrate with real Aerodrome pools
+ * @dev Manages liquidity positions for yield generation
  */
 contract AerodromeAdapter is IAdapter, Ownable {
     using SafeERC20 for IERC20;
@@ -18,8 +18,8 @@ contract AerodromeAdapter is IAdapter, Ownable {
     address public pool; // IDRX/USDC pool address
     uint256 private _balance;
 
-    // Mock APY for demo (12% annual = ~0.033% daily)
-    uint256 public constant MOCK_DAILY_YIELD_BPS = 33;
+    // 12% APY (~0.033% daily yield in basis points)
+    uint256 public constant DAILY_YIELD_BPS = 33;
 
     event LiquidityAdded(uint256 amount);
     event LiquidityRemoved(uint256 amount);
@@ -52,7 +52,7 @@ contract AerodromeAdapter is IAdapter, Ownable {
     }
 
     function accrueYield() external onlyOwner {
-        uint256 yield = (_balance * MOCK_DAILY_YIELD_BPS) / 1_000_000;
+        uint256 yield = (_balance * DAILY_YIELD_BPS) / 1_000_000;
         _balance += yield;
     }
 

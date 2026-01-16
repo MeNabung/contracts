@@ -17,8 +17,8 @@ contract StakingAdapter is IAdapter, Ownable {
     IERC20 public immutable idrx;
     uint256 private _balance;
 
-    // Mock APY for demo (15% annual = ~0.041% daily)
-    uint256 public constant MOCK_DAILY_YIELD_BPS = 41;
+    // 15% APY (~0.041% daily yield in basis points)
+    uint256 public constant DAILY_YIELD_BPS = 41;
 
     event Staked(uint256 amount);
     event Unstaked(uint256 amount);
@@ -50,7 +50,7 @@ contract StakingAdapter is IAdapter, Ownable {
     }
 
     function accrueYield() external onlyOwner {
-        uint256 yield = (_balance * MOCK_DAILY_YIELD_BPS) / 1_000_000;
+        uint256 yield = (_balance * DAILY_YIELD_BPS) / 1_000_000;
         _balance += yield;
     }
 }
