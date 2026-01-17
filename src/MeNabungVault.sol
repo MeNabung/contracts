@@ -41,6 +41,12 @@ contract MeNabungVault is Ownable, ReentrancyGuard {
     event Withdrawn(address indexed user, uint256 amount);
     event StrategySet(address indexed user, uint256 options, uint256 lp, uint256 staking);
     event Rebalanced(address indexed user);
+    event PartialRebalance(
+        address indexed user,
+        address indexed fromAdapter,
+        address indexed toAdapter,
+        uint256 amount
+    );
 
     // ============ Constructor ============
 
@@ -158,21 +164,112 @@ contract MeNabungVault is Ownable, ReentrancyGuard {
     function rebalance() external nonReentrant {
         UserPosition storage pos = positions[msg.sender];
         require(pos.totalDeposited > 0, "No position to rebalance");
-        
+
         // Withdraw all from adapters
         uint256 optionsBalance = thetanutsAdapter.getBalance();
         uint256 lpBalance = aerodromeAdapter.getBalance();
         uint256 stakingBalance = stakingAdapter.getBalance();
-        
+
         if (optionsBalance > 0) thetanutsAdapter.withdraw(optionsBalance);
         if (lpBalance > 0) aerodromeAdapter.withdraw(lpBalance);
         if (stakingBalance > 0) stakingAdapter.withdraw(stakingBalance);
-        
+
         uint256 totalToRebalance = optionsBalance + lpBalance + stakingBalance;
-        
+
         // Re-split according to current strategy
         _splitAndDeposit(totalToRebalance, pos);
-        
+
+        emit Rebalanced(msg.sender);
+    }
+
+    /**
+     * @notice Partially rebalance by moving funds between two specific strategies
+     * @dev This is used by the AI rebalancing agent to optimize yields
+     * @param fromAdapter The adapter to withdraw from
+     * @param toAdapter The adapter to deposit into
+     * @param amount The amount to move
+     */
+    function rebalancePartial(
+        address fromAdapter,
+        address toAdapter,
+        uint256 amount
+    ) external nonReentrant {
+        UserPosition storage pos = positions[msg.sender];
+        require(pos.totalDeposited > 0, "No position to rebalance");
+        require(fromAdapter != toAdapter, "Same adapter");
+        require(amount > 0, "Amount must be > 0");
+
+        // Validate adapters
+        require(
+            fromAdapter == address(thetanutsAdapter) ||
+            fromAdapter == address(aerodromeAdapter) ||
+            fromAdapter == address(stakingAdapter),
+            "Invalid from adapter"
+        );
+        require(
+            toAdapter == address(thetanutsAdapter) ||
+            toAdapter == address(aerodromeAdapter) ||
+            toAdapter == address(stakingAdapter),
+            "Invalid to adapter"
+        );
+
+        // Withdraw from source adapter
+        IAdapter(fromAdapter).withdraw(amount);
+
+        // Approve and deposit to target adapter
+        idrx.approve(toAdapter, amount);
+        IAdapter(toAdapter).deposit(amount);
+
+        // Update allocation percentages based on actual amounts
+        _updateAllocationsAfterPartialRebalance(pos, fromAdapter, toAdapter, amount);
+
+        pos.lastUpdateTime = block.timestamp;
+
+        emit PartialRebalance(msg.sender, fromAdapter, toAdapter, amount);
+    }
+
+    /**
+     * @notice Rebalance with a new strategy in one transaction
+     * @dev Combines setStrategy and rebalance for gas efficiency
+     * @param optionsPercent New options allocation percentage
+     * @param lpPercent New LP allocation percentage
+     * @param stakingPercent New staking allocation percentage
+     */
+    function rebalanceWithNewStrategy(
+        uint256 optionsPercent,
+        uint256 lpPercent,
+        uint256 stakingPercent
+    ) external nonReentrant {
+        require(
+            optionsPercent + lpPercent + stakingPercent == 100,
+            "Allocations must sum to 100"
+        );
+
+        UserPosition storage pos = positions[msg.sender];
+        require(pos.totalDeposited > 0, "No position to rebalance");
+
+        // Update strategy
+        pos.optionsAllocation = optionsPercent;
+        pos.lpAllocation = lpPercent;
+        pos.stakingAllocation = stakingPercent;
+
+        // Withdraw all from adapters
+        uint256 optionsBalance = thetanutsAdapter.getBalance();
+        uint256 lpBalance = aerodromeAdapter.getBalance();
+        uint256 stakingBalance = stakingAdapter.getBalance();
+
+        if (optionsBalance > 0) thetanutsAdapter.withdraw(optionsBalance);
+        if (lpBalance > 0) aerodromeAdapter.withdraw(lpBalance);
+        if (stakingBalance > 0) stakingAdapter.withdraw(stakingBalance);
+
+        uint256 totalToRebalance = optionsBalance + lpBalance + stakingBalance;
+
+        // Re-split according to new strategy
+        _splitAndDeposit(totalToRebalance, pos);
+
+        pos.lastUpdateTime = block.timestamp;
+
+        emit StrategySet(msg.sender, optionsPercent, lpPercent, stakingPercent);
         emit Rebalanced(msg.sender);
     }
 
@@ -245,22 +342,47 @@ contract MeNabungVault is Ownable, ReentrancyGuard {
         uint256 optionsAmount = (amount * pos.optionsAllocation) / 100;
         uint256 lpAmount = (amount * pos.lpAllocation) / 100;
         uint256 stakingAmount = amount - optionsAmount - lpAmount; // Remainder to staking
-        
+
         // Approve and deposit to each adapter
         if (optionsAmount > 0) {
             idrx.approve(address(thetanutsAdapter), optionsAmount);
             thetanutsAdapter.deposit(optionsAmount);
         }
-        
+
         if (lpAmount > 0) {
             idrx.approve(address(aerodromeAdapter), lpAmount);
             aerodromeAdapter.deposit(lpAmount);
         }
-        
+
         if (stakingAmount > 0) {
             idrx.approve(address(stakingAdapter), stakingAmount);
             stakingAdapter.deposit(stakingAmount);
         }
+    }
+
+    /**
+     * @notice Update user allocation percentages after a partial rebalance
+     * @dev Recalculates percentages based on new adapter balances
+     */
+    function _updateAllocationsAfterPartialRebalance(
+        UserPosition storage pos,
+        address fromAdapter,
+        address toAdapter,
+        uint256 amount
+    ) internal {
+        // Get total balance across all adapters
+        uint256 optionsBalance = thetanutsAdapter.getBalance();
+        uint256 lpBalance = aerodromeAdapter.getBalance();
+        uint256 stakingBalance = stakingAdapter.getBalance();
+        uint256 totalBalance = optionsBalance + lpBalance + stakingBalance;
+
+        if (totalBalance == 0) return;
+
+        // Calculate new percentages based on actual balances
+        pos.optionsAllocation = (optionsBalance * 100) / totalBalance;
+        pos.lpAllocation = (lpBalance * 100) / totalBalance;
+        // Ensure percentages sum to 100 by assigning remainder to staking
+        pos.stakingAllocation = 100 - pos.optionsAllocation - pos.lpAllocation;
     }
 
     // ============ Admin Functions ============
